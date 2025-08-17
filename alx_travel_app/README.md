@@ -127,3 +127,39 @@ Supported filters:
 * `end_date` (less than or equal to)
 
 ---
+
+## 💳 Payment Endpoints
+
+### 🔸 Initiate Payment for a Booking
+
+**POST** `/api/listings/<listing_id>/bookings/<booking_id>/payments/`
+
+Response:
+
+```json
+{
+  "payment": {
+    "transaction_id": "454648fe-ed85-4157-b831-70f83402e4ea",
+    "status": "Pending",
+    "amount": 480.0,
+    "booking": 2
+  },
+  "checkout_url": "https://checkout.chapa.co/checkout/payment/Osg0l1lulzJfGrUAeYdRhJ48JPzZ8nhJJACWwFwQTHxKf"
+}
+
+---
+
+### 🔹 Verify Payment
+
+**GET** `/api/listings/<listing_id>/bookings/<booking_id>/payments/verify/?tx_ref=<transaction_id>`
+
+Response (example if successful):
+
+```json
+{
+  "transaction_id": "454648fe-ed85-4157-b831-70f83402e4ea",
+  "status": "Completed",
+  "amount": 480.0,
+  "booking": 2
+}
+```
