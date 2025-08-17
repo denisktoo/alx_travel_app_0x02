@@ -146,6 +146,7 @@ Response:
   },
   "checkout_url": "https://checkout.chapa.co/checkout/payment/Osg0l1lulzJfGrUAeYdRhJ48JPzZ8nhJJACWwFwQTHxKf"
 }
+```
 
 ---
 
