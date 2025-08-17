@@ -11,6 +11,8 @@ import os
 import requests
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from .tasks import send_payment_confirmation_email
+import uuid
 
 CHAPA_SECRET_KEY = os.getenv('CHAPA_SECRET_KEY')
 CHAPA_BASE_URL = os.getenv('CHAPA_BASE_URL', 'https://api.chapa.co/v1')
@@ -40,7 +42,46 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         listing = get_object_or_404(Listing, pk=self.kwargs.get('listing_pk'))
-        serializer.save(user=self.request.user, property=listing)
+        booking = serializer.save(user=self.request.user, property=listing)
+
+        # Automatically initiate payment after booking
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=booking.total_price,
+            status="Pending"
+        )
+
+        base_url = "http://127.0.0.1:8000"
+        callback_url = f"{base_url}/listings/{listing.pk}/bookings/{booking.pk}/payments/verify/"
+        return_url = f"{base_url}/listings/{listing.pk}/bookings/{booking.pk}/payments/success/"
+
+        payload = {
+            "amount": str(booking.total_price),
+            "currency": "ETB",
+            "email": booking.user.email,
+            "first_name": booking.user.first_name,
+            "last_name": booking.user.last_name,
+            "tx_ref": str(payment.transaction_id),
+            "callback_url": callback_url,
+            "return_url": return_url
+        }
+
+        headers = {
+            "Authorization": f"Bearer {CHAPA_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        chapa_url = f"{CHAPA_BASE_URL}/transaction/initialize"
+        response = requests.post(chapa_url, json=payload, headers=headers)
+        data = response.json()
+
+        if response.status_code == 200 and data.get('status') == 'success':
+            return data
+        else:
+            # If payment init fails, mark booking as unpaid or handle as needed
+            payment.status = "Failed"
+            payment.save()
+            return {"error": "Failed to initialize Chapa payment", "details": data}
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -67,6 +108,13 @@ class PaymentViewSet(viewsets.ModelViewSet):
         # Get the booking
         booking = get_object_or_404(Booking, pk=booking_pk, property_id=listing_pk)
 
+        # Save payment to DB with Pending status
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=booking.total_price,
+            status="Pending"
+        )
+
         # Dynamically build URLs for callback and return
         base_url = "http://127.0.0.1:8000"
         callback_url = f"{base_url}/listings/{listing_pk}/bookings/{booking_pk}/payments/verify/"
@@ -79,7 +127,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             "email": booking.user.email,
             "first_name": booking.user.first_name,
             "last_name": booking.user.last_name,
-            "tx_ref": str(booking.booking_id),
+            "tx_ref": str(payment.transaction_id),
             "callback_url": callback_url,
             "return_url": return_url
         }
@@ -95,12 +143,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
         data = response.json()
 
         if response.status_code == 200 and data.get('status') == 'success':
-            # Save payment to DB with Pending status
-            payment = Payment.objects.create(
-                booking=booking,
-                amount=booking.total_price,
-                status="Pending"
-            )
             return Response({
                 "payment": PaymentSerializer(payment).data,
                 "checkout_url": data['data']['checkout_url']
@@ -141,6 +183,14 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if data.get('status') == 'success' and chapa_status == 'success':
             payment.status = "Completed"
             payment.save()
+
+            # Send confirmation email asynchronously
+            send_payment_confirmation_email.delay(
+                booking.user.email,
+                booking.booking_id,
+                payment.amount
+            )
+
             return Response({
                 "message": "Payment verified successfully",
                 "payment": PaymentSerializer(payment).data,

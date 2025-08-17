@@ -12,7 +12,7 @@ nested_router = NestedDefaultRouter(router, r'listings', lookup='listing')
 nested_router.register(r'bookings', BookingViewSet, basename='listing-bookings')
 
 # Nested router of payments under bookings
-payments_router = NestedDefaultRouter(router, r'bookings', lookup='booking')
+payments_router = NestedDefaultRouter(nested_router, r'bookings', lookup='booking')
 payments_router.register(r'payments', PaymentViewSet, basename='booking-payments')
 
 urlpatterns =[
